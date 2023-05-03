@@ -1,0 +1,7 @@
+/cloudvisor-quotes/node_modules
+/.dockerignore
+/cloudvisor-quotes/.gitignore
+/cloudvisor-quotes/.eslintrc.js
+/cloudvisor-quotes/.prettierrc
+/cloudvisor-quotes/README.md
+/cloudvisor-quotes/dist

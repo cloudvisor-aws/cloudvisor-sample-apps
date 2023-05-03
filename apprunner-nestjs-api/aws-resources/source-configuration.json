@@ -1,0 +1,13 @@
+{
+    "ImageRepository": {
+        "ImageIdentifier": "<account-number>.dkr.ecr.eu-central-1.amazonaws.com/quotes-of-cloudvisor:1",
+        "ImageConfiguration": {
+            "Port": "3000"
+        },
+        "ImageRepositoryType": "ECR"
+    },
+    "AutoDeploymentsEnabled": false,
+    "AuthenticationConfiguration": {
+        "AccessRoleArn": "arn:aws:iam::<account-number>:role/AppRunnerECRAccessRole0"
+    }
+}
