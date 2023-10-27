@@ -18,7 +18,7 @@ sam deploy --stack-name multitenantapp \
 --capabilities CAPABILITY_AUTO_EXPAND CAPABILITY_NAMED_IAM CAPABILITY_IAM \
 --region us-east-1 \
 --s3-bucket cloudvisor-stacks-bucket-us-east-1 \
---parameter-overrides R53HostedZoneDomainName=example.com R53HostedZoneId=Z038114731YPHB75QF8WZ ACMWildCardDomainName=*.example.com MultiTenantDomainAliases=blue.example.com,red.example.com \
+--parameter-overrides R53HostedZoneDomainName=example.com R53HostedZoneId=Z012423441YPHB75QF8WZ ACMWildCardDomainName=*.example.com MultiTenantDomainAliases=blue.example.com,red.example.com \
 --debug \
 --profile cloudvisor
 ```
