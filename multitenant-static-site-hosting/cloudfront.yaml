@@ -1,0 +1,164 @@
+AWSTemplateFormatVersion: "2010-09-09"
+Transform: "AWS::Serverless-2016-10-31"
+Parameters:
+  R53HostedZoneDomainName:
+    Type: String
+    Description: Route53 Domain Name
+  R53HostedZoneId:
+    Type: String
+    Description: Route53 Hosted Zone ID
+  ACMWildCardDomainName:
+    Type: String
+    Description: ACM will create a wild card certificate, provide a domain name like *.example.com
+  MultiTenantDomainAliases:
+    Type: List<String>
+    Description: List of Alternate Domain Names for CloudFront Distribution
+
+Resources:
+  LambdaEdgeFunctionRole:
+    Type: "AWS::IAM::Role"
+    Properties:
+      RoleName: !Sub "RoutingLambdaRole${AWS::StackName}"
+      Path: "/"
+      ManagedPolicyArns:
+        - "arn:aws:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole"
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Sid: "AllowLambdaServiceToAssumeRole"
+            Effect: "Allow"
+            Action:
+              - "sts:AssumeRole"
+            Principal:
+              Service:
+                - "lambda.amazonaws.com"
+                - "edgelambda.amazonaws.com"
+
+  RoutingLambda:
+    Type: "AWS::Serverless::Function"
+    Properties:
+      FunctionName: !Sub "RoutingLambda${AWS::StackName}"
+      Handler: index.handler
+      Runtime: nodejs18.x
+      CodeUri: ./lambda@edge/
+      Description: Lambda@Edge function for CloudFront
+      MemorySize: 128
+      Timeout: 1
+      Role: !GetAtt LambdaEdgeFunctionRole.Arn
+      AutoPublishAlias: live
+
+  S3Bucket:
+    Type: AWS::S3::Bucket
+    Properties:
+      AccessControl: Private
+      BucketName: !Sub "mutitenant-sourcecode-${AWS::StackName}"
+
+  OriginAccessControl:
+    Type: AWS::CloudFront::OriginAccessControl
+    Properties:
+      OriginAccessControlConfig:
+        Description: "origin access control(OAC) for allowing cloudfront to access S3 bucket"
+        Name: !Sub "mutitenant-sourcecode-access-control-${AWS::StackName}"
+        OriginAccessControlOriginType: s3
+        SigningBehavior: always
+        SigningProtocol: sigv4
+
+  ACMCertificate:
+    Type: "AWS::CertificateManager::Certificate"
+    Properties:
+      DomainName: !Ref ACMWildCardDomainName
+      DomainValidationOptions:
+        - DomainName: !Ref R53HostedZoneDomainName
+          HostedZoneId: !Ref R53HostedZoneId
+      ValidationMethod: DNS
+
+  CachePolicy:
+    Type: "AWS::CloudFront::CachePolicy"
+    Properties:
+      CachePolicyConfig:
+        Name: !Sub "CacheHostHeader${AWS::StackName}"
+        DefaultTTL: 3600
+        MaxTTL: 86400
+        MinTTL: 60
+        ParametersInCacheKeyAndForwardedToOrigin:
+          CookiesConfig:
+            CookieBehavior: none
+          QueryStringsConfig:
+            QueryStringBehavior: none
+          HeadersConfig:
+            HeaderBehavior: whitelist
+            Headers:
+              - Host
+          EnableAcceptEncodingBrotli: true
+          EnableAcceptEncodingGzip: true
+
+  CloudFrontDistribution:
+    Type: AWS::CloudFront::Distribution
+    DependsOn:
+      - S3Bucket
+    Properties:
+      DistributionConfig:
+        Origins:
+          - DomainName: !GetAtt S3Bucket.DomainName
+            Id: multitenant-source
+            S3OriginConfig:
+              OriginAccessIdentity: ""
+            OriginAccessControlId: !GetAtt OriginAccessControl.Id
+        Enabled: "true"
+        DefaultRootObject: index.html
+        CustomErrorResponses:
+          - ErrorCode: 404
+            ResponseCode: 200
+            ResponsePagePath: /index.html
+          - ErrorCode: 403
+            ResponseCode: 200
+            ResponsePagePath: /index.html
+        HttpVersion: http2
+        Aliases: !Ref MultiTenantDomainAliases
+        ViewerCertificate:
+          AcmCertificateArn: !Ref ACMCertificate
+          MinimumProtocolVersion: TLSv1.2_2021
+          SslSupportMethod: sni-only
+        DefaultCacheBehavior:
+          CachePolicyId: !Ref CachePolicy
+          AllowedMethods:
+            - GET
+            - HEAD
+            - OPTIONS
+          Compress: true
+          TargetOriginId: multitenant-source
+          ViewerProtocolPolicy: redirect-to-https
+          LambdaFunctionAssociations:
+          - EventType: origin-request
+            LambdaFunctionARN: !Ref RoutingLambda.Version
+
+  BucketPolicy:
+    Type: AWS::S3::BucketPolicy
+    Properties:
+      Bucket: !Ref S3Bucket
+      PolicyDocument:
+        Statement:
+        - Action: s3:GetObject
+          Effect: Allow
+          Resource: !Sub ${S3Bucket.Arn}/*
+          Principal:
+            Service: cloudfront.amazonaws.com
+          Condition:
+            StringEquals:
+              AWS:SourceArn: !Sub arn:aws:cloudfront::${AWS::AccountId}:distribution/${CloudFrontDistribution}
+
+  DNSRecord1:
+    Type: "AWS::Route53::RecordSetGroup"
+    Properties:
+      HostedZoneId: !Ref R53HostedZoneId
+      RecordSets:
+        - Name: !Select [1, !Ref MultiTenantDomainAliases]
+          Type: A
+          AliasTarget:
+            HostedZoneId: "Z2FDTNDATAQYW2"
+            DNSName: !GetAtt CloudFrontDistribution.DomainName
+        - Name: !Select [0, !Ref MultiTenantDomainAliases]
+          Type: A
+          AliasTarget:
+            HostedZoneId: "Z2FDTNDATAQYW2"
+            DNSName: !GetAtt CloudFrontDistribution.DomainName
